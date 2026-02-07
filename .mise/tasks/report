@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+#MISE description="Show overview of experiment results"
+#USAGE flag "--full <name>" help="Show full output for a specific experiment (e.g. alternating_sonnet)"
+set -eo pipefail
+
+RESULTS_DIR="./results"
+
+if [ ! -d "$RESULTS_DIR" ]; then
+  echo "No results yet. Run 'mise run batch' first."
+  exit 0
+fi
+
+# Full mode: show all outputs for one experiment
+if [ -n "${usage_full:-}" ]; then
+  EXPERIMENT_DIR="$RESULTS_DIR/${usage_full}"
+  if [ ! -d "$EXPERIMENT_DIR" ]; then
+    echo "Error: no results for '${usage_full}'"
+    echo "Available:"
+    ls -1 "$RESULTS_DIR" | sed 's/^/  /'
+    exit 1
+  fi
+
+  SUMMARY="$EXPERIMENT_DIR/summary.json"
+  NAME=$(jq -r '.name' "$SUMMARY")
+  SEQUENCE=$(jq -r '.sequence' "$SUMMARY")
+  ANSWER=$(jq -r '.answer' "$SUMMARY")
+  MODEL=$(jq -r '.model' "$SUMMARY")
+
+  echo "Experiment: $NAME"
+  echo "Sequence: $SEQUENCE"
+  echo "Answer: $ANSWER"
+  echo "Model: $MODEL"
+  echo ""
+
+  for f in "$EXPERIMENT_DIR"/count_*.txt; do
+    COUNT=$(basename "$f" | sed 's/count_//' | sed 's/\.txt//')
+    echo "━━━ Count $COUNT ━━━"
+    cat "$f"
+    echo ""
+  done
+  exit 0
+fi
+
+# Overview mode: show summary table
+echo "Experiment Results"
+echo "=================="
+echo ""
+
+for dir in "$RESULTS_DIR"/*/; do
+  [ -d "$dir" ] || continue
+  SUMMARY="$dir/summary.json"
+  [ -f "$SUMMARY" ] || continue
+
+  NAME=$(jq -r '.name' "$SUMMARY")
+  MODEL=$(jq -r '.model' "$SUMMARY")
+  SEQUENCE=$(jq -r '.sequence' "$SUMMARY")
+  ANSWER=$(jq -r '.answer' "$SUMMARY")
+
+  echo "▸ ${NAME} (${MODEL})"
+  echo "  Sequence: $SEQUENCE → answer: $ANSWER"
+
+  # Show first meaningful line from each count file as a snippet
+  for f in "$dir"/count_*.txt; do
+    [ -f "$f" ] || continue
+    COUNT=$(basename "$f" | sed 's/count_//' | sed 's/\.txt//')
+    # Grab the line with the top prediction (look for **bold** text or "most likely")
+    SNIPPET=$(grep -m1 -oE '\*\*[^*]+\*\*' "$f" 2>/dev/null | head -1 || echo "")
+    if [ -z "$SNIPPET" ]; then
+      SNIPPET=$(head -3 "$f" | tail -1 | cut -c1-50)
+    fi
+    printf "  count %s: %s\n" "$COUNT" "$SNIPPET"
+  done
+  echo ""
+done
+
+echo "Use --full <name>_<model> to see full outputs (e.g. mise run report --full alternating_sonnet)"

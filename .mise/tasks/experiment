@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+#MISE description="Run a prediction experiment across all context sizes"
+#USAGE arg "frames_dir" help="Path to directory containing frame images"
+#USAGE flag "--name <name>" help="Experiment name (for results directory)"
+#USAGE flag "--model <model>" help="Claude model to use (default: sonnet)"
+set -eo pipefail
+
+FRAMES_DIR="${usage_frames_dir:-$1}"
+MODEL="${usage_model:-sonnet}"
+NAME="${usage_name:-experiment}"
+
+if [ ! -d "$FRAMES_DIR" ]; then
+  echo "Error: frames directory not found: $FRAMES_DIR"
+  exit 1
+fi
+
+FRAMES_DIR="$(realpath "$FRAMES_DIR")"
+
+# Read metadata
+if [ ! -f "$FRAMES_DIR/metadata.json" ]; then
+  echo "Error: no metadata.json in $FRAMES_DIR"
+  exit 1
+fi
+
+FRAME_COUNT=$(jq -r '.frame_count' "$FRAMES_DIR/metadata.json")
+ANSWER=$(jq -r '.answer' "$FRAMES_DIR/metadata.json")
+SEQUENCE=$(jq -r '.sequence | join(",")' "$FRAMES_DIR/metadata.json")
+
+# Setup results directory
+RESULTS_DIR="./results/${NAME}_${MODEL}"
+mkdir -p "$RESULTS_DIR"
+
+echo "Experiment: $NAME"
+echo "Sequence: $SEQUENCE"
+echo "Answer: $ANSWER"
+echo "Model: $MODEL"
+echo "Counts: 2..$FRAME_COUNT"
+echo "Results: $RESULTS_DIR"
+echo "==="
+
+# Run predict for each count
+for COUNT in $(seq 2 "$FRAME_COUNT"); do
+  OUTFILE="$RESULTS_DIR/count_${COUNT}.txt"
+
+  echo -n "Count $COUNT/$FRAME_COUNT... "
+
+  # Capture just the agent response (skip the header lines before ---)
+  mise run predict "$FRAMES_DIR" --count "$COUNT" --model "$MODEL" --ranked 2>&1 | \
+    sed -n '/^---$/,$ p' | tail -n +2 > "$OUTFILE"
+
+  # Show first line as preview
+  PREVIEW=$(head -1 "$OUTFILE" | cut -c1-60)
+  echo "done → $OUTFILE"
+done
+
+# Write summary metadata
+jq -n \
+  --arg name "$NAME" \
+  --arg sequence "$SEQUENCE" \
+  --arg answer "$ANSWER" \
+  --arg model "$MODEL" \
+  --argjson frame_count "$FRAME_COUNT" \
+  --arg frames_dir "$FRAMES_DIR" \
+  '{
+    name: $name,
+    sequence: $sequence,
+    answer: $answer,
+    model: $model,
+    frame_count: $frame_count,
+    frames_dir: $frames_dir,
+    counts_run: [range(2; $frame_count + 1)]
+  }' > "$RESULTS_DIR/summary.json"
+
+echo "==="
+echo "Done. Results in $RESULTS_DIR"

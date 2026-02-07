@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#MISE description="Ask an agent to predict the next frame in a sequence"
+#USAGE arg "frames_dir" help="Path to directory containing frame images"
+#USAGE flag "--count <n>" help="Number of frames to show (default: all)"
+#USAGE flag "--model <model>" help="Claude model to use (default: sonnet)"
+#USAGE flag "--ranked" help="Ask for top predictions with confidence levels"
+set -eo pipefail
+
+FRAMES_DIR="${usage_frames_dir:-$1}"
+MODEL="${usage_model:-sonnet}"
+
+if [ ! -d "$FRAMES_DIR" ]; then
+  echo "Error: frames directory not found: $FRAMES_DIR"
+  exit 1
+fi
+
+FRAMES_DIR="$(realpath "$FRAMES_DIR")"
+
+# Get sorted frame files
+FRAME_FILES=($(ls "$FRAMES_DIR"/frame_*.png 2>/dev/null | sort))
+TOTAL=${#FRAME_FILES[@]}
+
+if [ "$TOTAL" -eq 0 ]; then
+  echo "Error: no frame files found in $FRAMES_DIR"
+  exit 1
+fi
+
+# Select how many to show
+COUNT="${usage_count:-$TOTAL}"
+if [ "$COUNT" -gt "$TOTAL" ]; then
+  COUNT="$TOTAL"
+fi
+
+# Build the prompt
+if [ "$COUNT" -eq 0 ]; then
+  PROMPT="You are being shown a sequence of frames. You haven't seen any frames yet. Predict what you think the first frame might show."
+else
+  FRAME_LIST=""
+  for i in $(seq 0 $((COUNT - 1))); do
+    FRAME_LIST="${FRAME_LIST}${FRAME_FILES[$i]}"$'\n'
+  done
+
+  if [ "${usage_ranked:-}" = "true" ]; then
+    PROMPT="You are being shown a sequence of $COUNT frames. Read each frame image in order, observe what's shown, then list your top predictions for what the next frame would show. For each prediction, explain the pattern you're assuming and give a confidence level.
+
+Frame files (read them in order):
+${FRAME_LIST}
+What are your top predictions for the next frame?"
+  else
+    PROMPT="You are being shown a sequence of $COUNT frames. Read each frame image in order, observe what's shown, and predict what the next frame in the sequence would show.
+
+Frame files (read them in order):
+${FRAME_LIST}
+What do you predict the next frame shows?"
+  fi
+fi
+
+echo "Frames: $COUNT/$TOTAL"
+echo "Model: $MODEL"
+echo "---"
+
+echo "$PROMPT" | claude --print \
+  --dangerously-skip-permissions \
+  --model "$MODEL" \
+  --allowedTools "Read"

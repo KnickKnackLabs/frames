@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+#MISE description="Generate numbered frame images from a sequence"
+#USAGE arg "sequence" help="Comma-separated values (last is the answer, e.g. 0,1,0,1,0,1)"
+#USAGE flag "--out <dir>" help="Output directory (default: ./frames/seq_<sequence>)"
+#USAGE flag "--size <size>" help="Image dimensions as WxH (default: 200x200)"
+set -eo pipefail
+
+SEQUENCE="${usage_sequence:-$1}"
+SIZE="${usage_size:-200x200}"
+WIDTH="${SIZE%x*}"
+HEIGHT="${SIZE#*x}"
+
+if [ -z "$SEQUENCE" ]; then
+  echo "Error: sequence required (e.g. 0,1,0,1,0,1)"
+  exit 1
+fi
+
+# Parse sequence into array
+IFS=',' read -ra NUMS <<< "$SEQUENCE"
+
+if [ ${#NUMS[@]} -lt 2 ]; then
+  echo "Error: sequence must have at least 2 values (frames + answer)"
+  exit 1
+fi
+
+# Last value is the answer, rest are frames
+LAST_IDX=$(( ${#NUMS[@]} - 1 ))
+ANSWER="${NUMS[$LAST_IDX]}"
+FRAME_VALS=("${NUMS[@]:0:$LAST_IDX}")
+
+# Derive output directory (use hash to avoid leaking sequence in dir name)
+SEQ_HASH=$(echo -n "$SEQUENCE" | shasum | cut -c1-8)
+OUT_DIR="${usage_out:-./frames/seq_${SEQ_HASH}}"
+
+mkdir -p "$OUT_DIR"
+
+echo "Sequence: ${FRAME_VALS[*]}"
+echo "Answer: $ANSWER"
+echo "Frames: ${#FRAME_VALS[@]}"
+
+# Generate frame images with Pillow
+uv run --with pillow python3 - "$SEQUENCE" "$OUT_DIR" "$WIDTH" "$HEIGHT" <<'PYTHON'
+import sys
+from PIL import Image, ImageDraw, ImageFont
+
+sequence = sys.argv[1].split(",")
+out_dir = sys.argv[2]
+width, height = int(sys.argv[3]), int(sys.argv[4])
+
+values = sequence[:-1]
+font_size = min(width, height) // 2
+
+# Try platform fonts, fall back to default
+font = None
+for path in [
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+]:
+    try:
+        font = ImageFont.truetype(path, font_size)
+        break
+    except (OSError, IOError):
+        continue
+if font is None:
+    font = ImageFont.load_default()
+
+for i, val in enumerate(values):
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+    bbox = draw.textbbox((0, 0), val, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    x = (width - tw) / 2 - bbox[0]
+    y = (height - th) / 2 - bbox[1]
+    draw.text((x, y), val, fill="black", font=font)
+    img.save(f"{out_dir}/frame_{i:03d}.png")
+PYTHON
+
+echo "Generated: ${#FRAME_VALS[@]} frames → $OUT_DIR"
+
+# Write metadata
+FRAMES_JSON="[]"
+for i in "${!FRAME_VALS[@]}"; do
+  FILENAME=$(printf "frame_%03d.png" "$i")
+  FRAMES_JSON=$(echo "$FRAMES_JSON" | jq \
+    --argjson idx "$i" \
+    --arg file "$FILENAME" \
+    --arg value "${FRAME_VALS[$i]}" \
+    '. + [{index: $idx, file: $file, value: $value}]')
+done
+
+SEQ_JSON=$(printf '%s\n' "${NUMS[@]}" | jq -s '.')
+
+jq -n \
+  --argjson sequence "$SEQ_JSON" \
+  --argjson frame_count "${#FRAME_VALS[@]}" \
+  --arg answer "$ANSWER" \
+  --argjson frames "$FRAMES_JSON" \
+  '{
+    sequence: $sequence,
+    frame_count: $frame_count,
+    answer: $answer,
+    frames: $frames
+  }' > "$OUT_DIR/metadata.json"
+
+echo "Metadata: $OUT_DIR/metadata.json"

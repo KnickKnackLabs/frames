@@ -1,4 +1,5 @@
 [tools]
 ffmpeg = "latest"
+uv = "latest"
 usage = "latest"
 jq = "latest"
