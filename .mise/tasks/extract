@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+#MISE description="Extract frames from a video file"
+#USAGE arg "video" help="Path to the video file"
+#USAGE flag "--fps <fps>" help="Frames per second to extract (default: 1, use 'all' for every frame)"
+#USAGE flag "--every <n>" help="Extract every Nth frame (e.g. 2 = every other frame)"
+#USAGE flag "--start <time>" help="Start time (e.g. 10, 1:30, 0:00:45)"
+#USAGE flag "--end <time>" help="End time (e.g. 60, 2:00, 0:01:30)"
+#USAGE flag "--out <dir>" help="Output directory (default: ./frames/<video-name>)"
+set -eo pipefail
+
+VIDEO="${usage_video:-$1}"
+
+if [ ! -f "$VIDEO" ]; then
+  echo "Error: video file not found: $VIDEO"
+  exit 1
+fi
+
+# Derive video name (without extension) for output directory
+VIDEO_NAME="$(basename "$VIDEO" | sed 's/\.[^.]*$//')"
+OUT_DIR="${usage_out:-./frames/$VIDEO_NAME}"
+
+mkdir -p "$OUT_DIR"
+
+# Get video metadata
+DURATION=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 "$VIDEO")
+SOURCE_FPS=$(ffprobe -v quiet -show_entries stream=r_frame_rate -of csv=p=0 -select_streams v:0 "$VIDEO")
+
+# Compute decimal source fps (e.g. 30000/1001 → 29.970030)
+SOURCE_FPS_DEC="$SOURCE_FPS"
+if echo "$SOURCE_FPS_DEC" | grep -q '/'; then
+  SOURCE_FPS_DEC=$(echo "$SOURCE_FPS_DEC" | awk -F/ '{printf "%.6f", $1/$2}')
+fi
+
+echo "Video: $VIDEO"
+echo "Duration: ${DURATION}s"
+echo "Source FPS: $SOURCE_FPS"
+
+# Build ffmpeg input args (time range)
+INPUT_ARGS=()
+if [ -n "${usage_start:-}" ]; then
+  INPUT_ARGS+=(-ss "${usage_start}")
+  echo "Start: ${usage_start}"
+fi
+if [ -n "${usage_end:-}" ]; then
+  INPUT_ARGS+=(-to "${usage_end}")
+  echo "End: ${usage_end}"
+fi
+
+# Build video filter chain
+FILTERS=()
+if [ -n "${usage_every:-}" ]; then
+  FILTERS+=("select=not(mod(n\\,${usage_every}))")
+  echo "Every: ${usage_every}th frame"
+fi
+FPS="${usage_fps:-1}"
+if [ "$FPS" != "all" ]; then
+  # Cap at source fps
+  if awk "BEGIN{exit !($FPS > $SOURCE_FPS_DEC)}"; then
+    echo "FPS: ${FPS} exceeds source (${SOURCE_FPS_DEC}), capping"
+    FPS="$SOURCE_FPS_DEC"
+  fi
+  FILTERS+=("fps=${FPS}")
+  echo "FPS: ${FPS}"
+else
+  echo "Extracting: all frames"
+fi
+
+VF_ARG=""
+if [ ${#FILTERS[@]} -gt 0 ]; then
+  VF_ARG="-vf $(IFS=,; echo "${FILTERS[*]}")"
+fi
+
+# Extract frames
+# shellcheck disable=SC2086
+ffmpeg "${INPUT_ARGS[@]}" -i "$VIDEO" $VF_ARG -vsync vfr -frame_pts 1 "$OUT_DIR/frame_%06d.png" -y -v quiet
+
+# Count extracted frames and build metadata from actual files
+FRAME_FILES=($(ls "$OUT_DIR"/frame_*.png 2>/dev/null | sort))
+FRAME_COUNT=${#FRAME_FILES[@]}
+echo "Extracted: $FRAME_COUNT frames → $OUT_DIR"
+
+# Build metadata from actual filenames (handles gaps from --every and --start/--end)
+FRAMES_JSON="[]"
+for i in "${!FRAME_FILES[@]}"; do
+  FILE=$(basename "${FRAME_FILES[$i]}")
+  # Extract frame number from filename to compute timestamp
+  FRAME_NUM=$(echo "$FILE" | sed 's/frame_0*//' | sed 's/\.png//')
+  if [ -z "$FRAME_NUM" ]; then FRAME_NUM=0; fi
+  TIMESTAMP=$(echo "$FRAME_NUM $SOURCE_FPS_DEC" | awk '{printf "%.6f", $1 / $2}')
+  FRAMES_JSON=$(echo "$FRAMES_JSON" | jq \
+    --argjson idx "$i" \
+    --arg file "$FILE" \
+    --argjson ts "$TIMESTAMP" \
+    '. + [{index: $idx, file: $file, timestamp_s: $ts}]')
+done
+
+jq -n \
+  --arg video "$(realpath "$VIDEO")" \
+  --arg video_name "$VIDEO_NAME" \
+  --arg duration "$DURATION" \
+  --arg source_fps "$SOURCE_FPS" \
+  --argjson frame_count "$FRAME_COUNT" \
+  --argjson frames "$FRAMES_JSON" \
+  '{
+    video: $video,
+    video_name: $video_name,
+    duration_s: ($duration | tonumber),
+    source_fps: $source_fps,
+    frame_count: $frame_count,
+    frames: $frames
+  }' > "$OUT_DIR/metadata.json"
+
+echo "Metadata: $OUT_DIR/metadata.json"
