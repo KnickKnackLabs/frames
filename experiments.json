@@ -4,5 +4,7 @@
   {"name": "squares", "sequence": "1,4,9,16,25,36", "models": ["sonnet"]},
   {"name": "collatz-6", "sequence": "6,3,10,5,16,8", "models": ["sonnet"]},
   {"name": "mod3", "sequence": "1,2,0,1,2,0,1", "models": ["sonnet"]},
-  {"name": "interleaved", "sequence": "1,10,2,20,3,30", "models": ["sonnet"]}
+  {"name": "interleaved", "sequence": "1,10,2,20,3,30", "models": ["sonnet"]},
+  {"name": "rotation-5", "type": "visual", "pattern": "rotation", "steps": 5, "models": ["sonnet"]},
+  {"name": "rotation-9", "type": "visual", "pattern": "rotation", "steps": 9, "models": ["sonnet"]}
 ]

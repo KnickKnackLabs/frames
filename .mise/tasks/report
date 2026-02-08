@@ -22,12 +22,12 @@ if [ -n "${usage_full:-}" ]; then
 
   SUMMARY="$EXPERIMENT_DIR/summary.json"
   NAME=$(jq -r '.name' "$SUMMARY")
-  SEQUENCE=$(jq -r '.sequence' "$SUMMARY")
+  DESCRIPTION=$(jq -r '.description // .sequence // "unknown"' "$SUMMARY")
   ANSWER=$(jq -r '.answer' "$SUMMARY")
   MODEL=$(jq -r '.model' "$SUMMARY")
 
   echo "Experiment: $NAME"
-  echo "Sequence: $SEQUENCE"
+  echo "Description: $DESCRIPTION"
   echo "Answer: $ANSWER"
   echo "Model: $MODEL"
   echo ""
@@ -53,11 +53,11 @@ for dir in "$RESULTS_DIR"/*/; do
 
   NAME=$(jq -r '.name' "$SUMMARY")
   MODEL=$(jq -r '.model' "$SUMMARY")
-  SEQUENCE=$(jq -r '.sequence' "$SUMMARY")
+  DESCRIPTION=$(jq -r '.description // .sequence // "unknown"' "$SUMMARY")
   ANSWER=$(jq -r '.answer' "$SUMMARY")
 
   echo "▸ ${NAME} (${MODEL})"
-  echo "  Sequence: $SEQUENCE → answer: $ANSWER"
+  echo "  $DESCRIPTION → answer: $ANSWER"
 
   # Show first meaningful line from each count file as a snippet
   for f in "$dir"/count_*.txt; do

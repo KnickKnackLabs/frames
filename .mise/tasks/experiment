@@ -24,14 +24,14 @@ fi
 
 FRAME_COUNT=$(jq -r '.frame_count' "$FRAMES_DIR/metadata.json")
 ANSWER=$(jq -r '.answer' "$FRAMES_DIR/metadata.json")
-SEQUENCE=$(jq -r '.sequence | join(",")' "$FRAMES_DIR/metadata.json")
+DESCRIPTION=$(jq -r '.description // "unknown"' "$FRAMES_DIR/metadata.json")
 
 # Setup results directory
 RESULTS_DIR="./results/${NAME}_${MODEL}"
 mkdir -p "$RESULTS_DIR"
 
 echo "Experiment: $NAME"
-echo "Sequence: $SEQUENCE"
+echo "Description: $DESCRIPTION"
 echo "Answer: $ANSWER"
 echo "Model: $MODEL"
 echo "Counts: 2..$FRAME_COUNT"
@@ -56,14 +56,14 @@ done
 # Write summary metadata
 jq -n \
   --arg name "$NAME" \
-  --arg sequence "$SEQUENCE" \
+  --arg description "$DESCRIPTION" \
   --arg answer "$ANSWER" \
   --arg model "$MODEL" \
   --argjson frame_count "$FRAME_COUNT" \
   --arg frames_dir "$FRAMES_DIR" \
   '{
     name: $name,
-    sequence: $sequence,
+    description: $description,
     answer: $answer,
     model: $model,
     frame_count: $frame_count,

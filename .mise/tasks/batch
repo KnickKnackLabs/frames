@@ -18,21 +18,38 @@ echo "==="
 # Process each experiment
 for i in $(seq 0 $((TOTAL - 1))); do
   NAME=$(jq -r ".[$i].name" "$EXPERIMENTS_FILE")
-  SEQUENCE=$(jq -r ".[$i].sequence" "$EXPERIMENTS_FILE")
+  TYPE=$(jq -r ".[$i].type // \"sequence\"" "$EXPERIMENTS_FILE")
   MODELS=$(jq -r ".[$i].models // [\"sonnet\"] | .[]" "$EXPERIMENTS_FILE")
 
-  echo ""
-  echo "[$((i + 1))/$TOTAL] $NAME: $SEQUENCE"
+  if [ "$TYPE" = "visual" ]; then
+    PATTERN=$(jq -r ".[$i].pattern" "$EXPERIMENTS_FILE")
+    STEPS=$(jq -r ".[$i].steps" "$EXPERIMENTS_FILE")
+    echo ""
+    echo "[$((i + 1))/$TOTAL] $NAME: $PATTERN ($STEPS steps)"
 
-  # Generate frames (reuse if already exists)
-  SEQ_HASH=$(echo -n "$SEQUENCE" | shasum | cut -c1-8)
-  FRAMES_DIR="./frames/seq_${SEQ_HASH}"
+    PATTERN_HASH=$(echo -n "${PATTERN}_${STEPS}" | shasum | cut -c1-8)
+    FRAMES_DIR="./frames/vis_${PATTERN_HASH}"
 
-  if [ -d "$FRAMES_DIR" ] && [ -f "$FRAMES_DIR/metadata.json" ]; then
-    echo "  Frames: reusing $FRAMES_DIR"
+    if [ -d "$FRAMES_DIR" ] && [ -f "$FRAMES_DIR/metadata.json" ]; then
+      echo "  Frames: reusing $FRAMES_DIR"
+    else
+      echo "  Frames: generating..."
+      mise run generate-visual "$PATTERN" --steps "$STEPS" --out "$FRAMES_DIR" 2>&1 | sed 's/^/  /'
+    fi
   else
-    echo "  Frames: generating..."
-    mise run generate "$SEQUENCE" --out "$FRAMES_DIR" 2>&1 | sed 's/^/  /'
+    SEQUENCE=$(jq -r ".[$i].sequence" "$EXPERIMENTS_FILE")
+    echo ""
+    echo "[$((i + 1))/$TOTAL] $NAME: $SEQUENCE"
+
+    SEQ_HASH=$(echo -n "$SEQUENCE" | shasum | cut -c1-8)
+    FRAMES_DIR="./frames/seq_${SEQ_HASH}"
+
+    if [ -d "$FRAMES_DIR" ] && [ -f "$FRAMES_DIR/metadata.json" ]; then
+      echo "  Frames: reusing $FRAMES_DIR"
+    else
+      echo "  Frames: generating..."
+      mise run generate "$SEQUENCE" --out "$FRAMES_DIR" 2>&1 | sed 's/^/  /'
+    fi
   fi
 
   # Run experiment for each model

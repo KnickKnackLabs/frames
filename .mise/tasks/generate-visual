@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+#MISE description="Generate visual pattern frame images"
+#USAGE arg "pattern" help="Pattern type (rotation)"
+#USAGE flag "--steps <n>" help="Number of steps including answer (default: 5)"
+#USAGE flag "--out <dir>" help="Output directory"
+#USAGE flag "--size <size>" help="Image dimensions as WxH (default: 200x200)"
+set -eo pipefail
+
+PATTERN="${usage_pattern:-$1}"
+STEPS="${usage_steps:-5}"
+SIZE="${usage_size:-200x200}"
+WIDTH="${SIZE%x*}"
+HEIGHT="${SIZE#*x}"
+
+if [ -z "$PATTERN" ]; then
+  echo "Error: pattern required (e.g. rotation)"
+  exit 1
+fi
+
+# Derive output directory
+PATTERN_HASH=$(echo -n "${PATTERN}_${STEPS}" | shasum | cut -c1-8)
+OUT_DIR="${usage_out:-./frames/vis_${PATTERN_HASH}}"
+
+mkdir -p "$OUT_DIR"
+
+FRAME_COUNT=$((STEPS - 1))
+echo "Pattern: $PATTERN"
+echo "Steps: $STEPS (${FRAME_COUNT} frames + answer)"
+
+uv run --with pillow python3 - "$PATTERN" "$STEPS" "$OUT_DIR" "$WIDTH" "$HEIGHT" <<'PYTHON'
+import json
+import math
+import sys
+from PIL import Image, ImageDraw
+
+pattern = sys.argv[1]
+steps = int(sys.argv[2])
+out_dir = sys.argv[3]
+width, height = int(sys.argv[4]), int(sys.argv[5])
+
+cx, cy = width / 2, height / 2
+size = min(width, height) * 0.35
+
+
+def draw_arrow(draw, angle_deg, cx, cy, size):
+    """Draw an arrow pointing in the given direction (0=up, 90=right, etc)."""
+    angle_rad = math.radians(angle_deg)
+
+    # Arrow tip
+    tip_x = cx + size * math.sin(angle_rad)
+    tip_y = cy - size * math.cos(angle_rad)
+
+    # Arrow base (two points forming the tail)
+    base_angle = math.radians(angle_deg + 180)
+    base_x = cx + size * 0.5 * math.sin(base_angle)
+    base_y = cy - size * 0.5 * math.cos(base_angle)
+
+    left_angle = math.radians(angle_deg + 140)
+    right_angle = math.radians(angle_deg - 140)
+    wing = size * 0.45
+
+    left_x = cx + wing * math.sin(left_angle)
+    left_y = cy - wing * math.cos(left_angle)
+    right_x = cx + wing * math.sin(right_angle)
+    right_y = cy - wing * math.cos(right_angle)
+
+    # Draw shaft
+    shaft_width = max(3, int(size * 0.12))
+    draw.line([(base_x, base_y), (tip_x, tip_y)], fill="black", width=shaft_width)
+
+    # Draw arrowhead
+    draw.polygon([(tip_x, tip_y), (left_x, left_y), (right_x, right_y)], fill="black")
+
+
+def generate_rotation(steps):
+    """Generate frames with an arrow rotating clockwise."""
+    angle_step = 360 / steps
+    frames = []
+    for i in range(steps):
+        angle = i * angle_step
+        direction = f"{angle:.0f}deg"
+        frames.append({"angle": angle, "direction": direction})
+    return frames
+
+
+# Generate pattern data
+if pattern == "rotation":
+    all_steps = generate_rotation(steps)
+else:
+    print(f"Error: unknown pattern '{pattern}'", file=sys.stderr)
+    sys.exit(1)
+
+# Render frames (all except last, which is the answer)
+for i, step in enumerate(all_steps[:-1]):
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    if pattern == "rotation":
+        draw_arrow(draw, step["angle"], cx, cy, size)
+
+    img.save(f"{out_dir}/frame_{i:03d}.png")
+
+# Write metadata
+answer_step = all_steps[-1]
+step_dirs = [s["direction"] for s in all_steps]
+metadata = {
+    "description": f"{pattern}: {', '.join(step_dirs)}",
+    "pattern": pattern,
+    "frame_count": len(all_steps) - 1,
+    "answer": answer_step["direction"],
+    "steps": step_dirs,
+    "frames": [
+        {"index": i, "file": f"frame_{i:03d}.png", "value": s["direction"]}
+        for i, s in enumerate(all_steps[:-1])
+    ],
+}
+
+with open(f"{out_dir}/metadata.json", "w") as f:
+    json.dump(metadata, f, indent=2)
+
+print(f"Generated {len(all_steps) - 1} frames")
+print(f"Answer: {answer_step['direction']}")
+PYTHON
+
+echo "Output: $OUT_DIR"
+echo "Metadata: $OUT_DIR/metadata.json"

@@ -96,7 +96,9 @@ jq -n \
   --argjson frame_count "${#FRAME_VALS[@]}" \
   --arg answer "$ANSWER" \
   --argjson frames "$FRAMES_JSON" \
+  --arg description "$SEQUENCE" \
   '{
+    description: $description,
     sequence: $sequence,
     frame_count: $frame_count,
     answer: $answer,
