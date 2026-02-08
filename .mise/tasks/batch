@@ -38,17 +38,24 @@ for i in $(seq 0 $((TOTAL - 1))); do
     fi
   else
     SEQUENCE=$(jq -r ".[$i].sequence" "$EXPERIMENTS_FILE")
+    RENDER=$(jq -r ".[$i].render // \"\"" "$EXPERIMENTS_FILE")
+    END=$(jq -r ".[$i].end // \"\"" "$EXPERIMENTS_FILE")
     echo ""
     echo "[$((i + 1))/$TOTAL] $NAME: $SEQUENCE"
 
-    SEQ_HASH=$(echo -n "$SEQUENCE" | shasum | cut -c1-8)
+    HASH_INPUT="${SEQUENCE}_end${END:-last}"
+    [ -n "$RENDER" ] && HASH_INPUT="${HASH_INPUT}_$(basename "$RENDER")"
+    SEQ_HASH=$(echo -n "$HASH_INPUT" | shasum | cut -c1-8)
     FRAMES_DIR="./frames/seq_${SEQ_HASH}"
 
     if [ -d "$FRAMES_DIR" ] && [ -f "$FRAMES_DIR/metadata.json" ]; then
       echo "  Frames: reusing $FRAMES_DIR"
     else
       echo "  Frames: generating..."
-      mise run generate "$SEQUENCE" --out "$FRAMES_DIR" 2>&1 | sed 's/^/  /'
+      GENERATE_ARGS=("$SEQUENCE" --out "$FRAMES_DIR")
+      [ -n "$RENDER" ] && GENERATE_ARGS+=(--render "$RENDER")
+      [ -n "$END" ] && GENERATE_ARGS+=(--end "$END")
+      mise run generate "${GENERATE_ARGS[@]}" 2>&1 | sed 's/^/  /'
     fi
   fi
 
