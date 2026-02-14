@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+#MISE description="Give a model a quiz, optionally with knowledge docs"
+#USAGE arg "quiz_file" help="Path to quiz JSON file"
+#USAGE flag "--model <model>" help="Model to use (default: haiku)"
+#USAGE flag "--knowledge <dir>" help="Directory of knowledge docs to include as context"
+#USAGE flag "--system-prompt <prompt>" help="System prompt for the model"
+#USAGE flag "--question <id>" help="Run a single question by ID (default: all)"
+set -eo pipefail
+
+QUIZ_FILE="${usage_quiz_file:-$1}"
+MODEL="${usage_model:-haiku}"
+KNOWLEDGE_DIR="${usage_knowledge:-}"
+SYSTEM_PROMPT="${usage_system_prompt:-}"
+QUESTION_ID="${usage_question:-}"
+
+if [ ! -f "$QUIZ_FILE" ]; then
+  echo "Error: quiz file not found: $QUIZ_FILE" >&2
+  exit 1
+fi
+
+QUIZ_NAME=$(basename "$QUIZ_FILE" .json)
+
+# Build knowledge context
+KNOWLEDGE_CONTEXT=""
+if [ -n "$KNOWLEDGE_DIR" ] && [ -d "$KNOWLEDGE_DIR" ]; then
+  KNOWLEDGE_LABEL=$(basename "$KNOWLEDGE_DIR")
+  for f in "$KNOWLEDGE_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    FNAME=$(basename "$f")
+    KNOWLEDGE_CONTEXT="${KNOWLEDGE_CONTEXT}
+--- ${FNAME} ---
+$(cat "$f")
+
+"
+  done
+  echo "Knowledge: $KNOWLEDGE_LABEL ($(echo "$KNOWLEDGE_DIR"/*.md | wc -w | tr -d ' ') files)"
+else
+  KNOWLEDGE_LABEL="none"
+  echo "Knowledge: none"
+fi
+
+echo "Quiz: $QUIZ_NAME"
+echo "Model: $MODEL"
+
+# Set up results directory
+RUN_ID="${QUIZ_NAME}_${MODEL}_k-${KNOWLEDGE_LABEL}"
+RESULTS_DIR="./results/${RUN_ID}"
+mkdir -p "$RESULTS_DIR"
+
+# Get questions
+if [ -n "$QUESTION_ID" ]; then
+  QUESTIONS=$(jq -c "[.[] | select(.id == \"$QUESTION_ID\")]" "$QUIZ_FILE")
+else
+  QUESTIONS=$(jq -c '.' "$QUIZ_FILE")
+fi
+
+TOTAL=$(echo "$QUESTIONS" | jq length)
+echo "Questions: $TOTAL"
+echo "==="
+
+ATTEMPTED=0
+
+for i in $(seq 0 $((TOTAL - 1))); do
+  QID=$(echo "$QUESTIONS" | jq -r ".[$i].id")
+  QTEXT=$(echo "$QUESTIONS" | jq -r ".[$i].question")
+  EXPECTED=$(echo "$QUESTIONS" | jq -r ".[$i].answer")
+  DIFFICULTY=$(echo "$QUESTIONS" | jq -r ".[$i].difficulty")
+
+  echo ""
+  echo "--- $QID ($difficulty) ---"
+  echo "Q: $QTEXT"
+
+  # Build prompt — knowledge context goes in the user message
+  if [ -n "$KNOWLEDGE_CONTEXT" ]; then
+    PROMPT="You have been given reference material below. Use it to answer the question. Be concise and precise.
+
+REFERENCE MATERIAL:
+${KNOWLEDGE_CONTEXT}
+
+QUESTION: ${QTEXT}
+
+Answer concisely. If the question asks for code, provide the code. If it asks for an explanation, explain briefly."
+  else
+    PROMPT="Answer the following question concisely and precisely. If the question asks for code, provide the code. If it asks for an explanation, explain briefly.
+
+QUESTION: ${QTEXT}"
+  fi
+
+  # Build claude command
+  CLAUDE_ARGS=(-p --model "$MODEL" --no-session-persistence)
+  CLAUDE_ARGS+=(--tools "" --disable-slash-commands)
+  if [ -n "$SYSTEM_PROMPT" ]; then
+    CLAUDE_ARGS+=(--system-prompt "$SYSTEM_PROMPT")
+  fi
+
+  # Ask the model
+  ANSWER=$(CLAUDECODE= claude "${CLAUDE_ARGS[@]}" "$PROMPT")
+
+  echo "A: $ANSWER"
+  echo ""
+
+  # Save result
+  jq -n \
+    --arg id "$QID" \
+    --arg question "$QTEXT" \
+    --arg expected "$EXPECTED" \
+    --arg answer "$ANSWER" \
+    --arg difficulty "$DIFFICULTY" \
+    --arg model "$MODEL" \
+    --arg knowledge "$KNOWLEDGE_LABEL" \
+    --arg system_prompt "$SYSTEM_PROMPT" \
+    '{id: $id, question: $question, expected: $expected, answer: $answer, difficulty: $difficulty, model: $model, knowledge: $knowledge, system_prompt: $system_prompt}' \
+    > "$RESULTS_DIR/${QID}.json"
+
+  ATTEMPTED=$((ATTEMPTED + 1))
+done
+
+echo "==="
+echo "Done. $ATTEMPTED questions answered."
+echo "Results: $RESULTS_DIR"

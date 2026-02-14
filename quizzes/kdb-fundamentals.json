@@ -1,0 +1,50 @@
+[
+  {
+    "id": "q01",
+    "question": "What does `2*3+4` evaluate to in q, and why?",
+    "answer": "14, because q evaluates right-to-left with no operator precedence: 3+4=7, then 2*7=14",
+    "difficulty": "basic"
+  },
+  {
+    "id": "q02",
+    "question": "What is the difference between `42` and `enlist 42` in q?",
+    "answer": "42 is an atom (type -7h), enlist 42 is a one-element list (type 7h). They are structurally different — `42 ~ enlist 42` returns 0b (false).",
+    "difficulty": "basic"
+  },
+  {
+    "id": "q03",
+    "question": "Write a q expression to compute the 5-period moving average of the list 1 2 3 4 5 6 7 8 9 10.",
+    "answer": "5 mavg 1 2 3 4 5 6 7 8 9 10",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q04",
+    "question": "Given a table `trades` with columns `sym`, `price`, and `size`, write a qSQL query to compute the volume-weighted average price (VWAP) grouped by sym.",
+    "answer": "select vwap: size wavg price by sym from trades",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q05",
+    "question": "What does the `aj` (as-of join) do in kdb+? Give a one-sentence explanation and a simple example.",
+    "answer": "aj joins each row of the left table with the most recent matching row from the right table (by time). Example: aj[`sym`time; trades; quotes] — for each trade, find the latest quote with the same sym at or before the trade time.",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q06",
+    "question": "In q, what do the adverbs `/` (over) and `\\` (scan) do when applied to a dyadic function? Give an example of each using `+` on the list 1 2 3 4 5.",
+    "answer": "(+/) 1 2 3 4 5 gives 15 (fold/reduce — returns final accumulated result). (+\\) 1 2 3 4 5 gives 1 3 6 10 15 (scan — returns all intermediate results, i.e., running sum).",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q07",
+    "question": "Write the functional form (programmatic form) of this qSQL query: `select avg price by sym from trades`",
+    "answer": "?[trades; (); (enlist `sym)! enlist `sym; (enlist `avg_price)! enlist (avg; `price)]",
+    "difficulty": "hard"
+  },
+  {
+    "id": "q08",
+    "question": "You have a table of trades with a `time` column (timespan type) and a `price` column. Write a q expression to bucket the data into 15-minute bars and compute the average price per bar.",
+    "answer": "select avg price by 0D00:15 xbar time from trades",
+    "difficulty": "hard"
+  }
+]
